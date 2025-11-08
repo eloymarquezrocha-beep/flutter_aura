@@ -1,0 +1,83 @@
+name: flutter_aura
+description: "A new Flutter project."
+publish_to: 'none' # Remove this line if you wish to publish to pub.dev
+
+version: 1.0.0+1
+
+environment:
+  sdk: ">=3.9.2 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  glass: ^2.0.0+2
+
+
+  # HTTP requests
+
+  http: ^1.5.0
+
+  blurrycontainer: ^2.1.0
+
+
+  # Calendario
+  intl: any
+  table_calendar: ^3.2.0
+
+  # UI chat
+  dash_chat_3: ^1.0.1
+
+  # OpenAI SDK (chat)
+  chat_gpt_sdk: ^3.1.5
+
+  # Persistencia local
+  hive: ^2.2.3
+  hive_flutter: ^1.1.0
+  path_provider: ^2.0.15
+
+  # Variables de entorno
+  flutter_dotenv: ^5.1.0
+
+  # Utilidades
+  uuid: ^4.3.0
+
+  # Splash screen y estilos
+  flutter_native_splash: ^2.4.7
+  cupertino_icons: ^1.0.8
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+  build_runner: ^2.4.6
+  hive_generator: ^2.0.0
+  flutter_launcher_icons: ^0.14.4
+
+  
+
+flutter:
+  uses-material-design: true
+  assets:
+    - .env
+    - assets/logo4.png
+    - assets/House.png
+    - assets/Calendar.png
+    - assets/Perfil.png
+    - assets/logo.png
+  fonts:
+  - family: MonosRegular
+    fonts:
+      - asset: fonts/FragmentMono-Regular.ttf
+  - family: MonosItalic
+    fonts:
+      - asset: fonts/FragmentMono-Italic.ttf
+
+flutter_icons:
+  android: true
+  ios: true
+  image_path: "assets/logo.png"
+  adaptove_icon_foreground: "assets/logo4.png"
+  adaptive_icon_background: "#131313"
+
+
