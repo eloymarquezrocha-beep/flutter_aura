@@ -4,10 +4,18 @@ import 'package:dash_chat_3/dash_chat_3.dart';
 import 'package:uuid/uuid.dart';
 import 'message_model.dart';
 import 'storage_service.dart';
-import 'openai_service.dart';
+// import 'openai_service.dart'; // <--- (REEMPLAZADO) Ya no necesitamos esto
 import 'wave.dart';
 import 'calendario.dart';
 import 'profile_screen.dart';
+
+// --- (AÑADIDO) Imports para la API, JSON y Token ---
+import 'package:http/http.dart' as http;
+import 'dart:convert';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+
+// --- (AÑADIDO) La IP de tu servidor ---
+const String API_BASE = "https://dragonpardo.com";
 
 class ChatScreen extends StatefulWidget {
   final List<MessageModel>? initialMessages;
@@ -28,7 +36,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   final ChatUser user = ChatUser(id: 'user', firstName: 'Tú');
   final ChatUser bot = ChatUser(id: 'bot', firstName: 'Aura');
   final uuid = const Uuid();
-  final OpenAIService openAIService = OpenAIService();
+  
+  // final OpenAIService openAIService = OpenAIService(); // <--- (REEMPLAZADO)
+  final _storage = const FlutterSecureStorage(); // <--- (AÑADIDO) Para leer el token
 
   bool _isTyping = false;
   String _typingText = "";
@@ -93,9 +103,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     });
   }
 
+  // --- (MODIFICADO) Esta función ahora llama a tu Backend de Flask ---
   Future<void> _handleSend(ChatMessage msg) async {
     if (msg.text.trim().isEmpty) return;
 
+    // 1. Añade el mensaje del usuario a la UI y al storage local
     setState(() {
       messages.add(msg);
       _typingText = "";
@@ -108,43 +120,94 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         id: uuid.v4(),
         text: msg.text,
         sender: msg.user.id,
-        timestamp: msg.createdAt ?? DateTime.now(),
+        timestamp: msg.createdAt,
         sessionId: widget.sessionId,
       ),
     );
 
+    // 2. Llama a tu backend de Flask
     try {
-      final reply = await openAIService.sendMessage(msg.text);
-      for (int i = 0; i < reply.length; i++) {
-        await Future.delayed(const Duration(milliseconds: 25));
-        setState(() {
-          _typingText = reply.substring(0, i + 1);
-        });
+      // 2a. Obtener el Token de Acceso
+      final token = await _storage.read(key: "aura_token");
+      if (token == null) {
+        throw Exception("No se encontró token. Inicia sesión de nuevo.");
       }
 
+      // 2b. Preparar el Payload para Flask
+      final payload = jsonEncode({
+        "consulta": msg.text,
+        "rol": "Tutores Digitales" // O cualquier rol que quieras
+      });
+
+      // 2c. Llamar al backend de Flask con el token
+      final res = await http.post(
+        Uri.parse("$API_BASE/consulta"),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token' // ¡Autenticación!
+        },
+        body: payload,
+      );
+
+      // 2d. Procesar la respuesta de Flask
+      if (res.statusCode == 200) {
+        final data = jsonDecode(utf8.decode(res.bodyBytes));
+        final String reply = data['respuesta']; // Esta es la respuesta del profe
+
+        // Simular el "tipeo" (la animación de tu amigo)
+        for (int i = 0; i < reply.length; i++) {
+          await Future.delayed(const Duration(milliseconds: 25));
+          // Comprueba si el widget sigue montado antes de llamar a setState
+          if (!mounted) return;
+          setState(() {
+            _typingText = reply.substring(0, i + 1);
+          });
+        }
+
+        // Crear el mensaje final del bot
+        final botMsg = ChatMessage(
+          text: _typingText, // El texto final
+          user: bot,
+          createdAt: DateTime.now(),
+        );
+
+        // Guardar el mensaje del bot en el storage local
+        await StorageService.saveMessage(
+          MessageModel(
+            id: uuid.v4(),
+            text: botMsg.text,
+            sender: bot.id,
+            timestamp: botMsg.createdAt,
+            sessionId: widget.sessionId,
+          ),
+        );
+
+        // Añadir el mensaje final a la UI
+        if(mounted) {
+          setState(() => messages.add(botMsg));
+        }
+      } else {
+        // Manejar errores del servidor (ej. 401 Token expirado)
+        final data = jsonDecode(res.body);
+        throw Exception(data['error'] ?? "Error del servidor: ${res.statusCode}");
+      }
+    } catch (e) {
+      // Manejar errores de red o excepciones
       final botMsg = ChatMessage(
-        text: _typingText,
+        text: "⚠️ Error: ${e.toString()}",
         user: bot,
         createdAt: DateTime.now(),
       );
-
-      await StorageService.saveMessage(
-        MessageModel(
-          id: uuid.v4(),
-          text: botMsg.text,
-          sender: bot.id,
-          timestamp: botMsg.createdAt,
-          sessionId: widget.sessionId,
-        ),
-      );
-
-      setState(() => messages.add(botMsg));
-    } catch (e) {
-      setState(() => _typingText = "⚠️ Error al comunicarse con la IA");
+      if(mounted) {
+        setState(() => messages.add(botMsg));
+      }
     }
 
-    _updateWave(false);
+    if(mounted) {
+      _updateWave(false);
+    }
   }
+  // --- FIN DE LA MODIFICACIÓN ---
 
   InputOptions _buildInputOptions() {
     return InputOptions(
@@ -152,7 +215,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         hintText:
             _isTyping ? "Aura está escribiendo..." : "Escribe un mensaje...",
         hintStyle: TextStyle(
-          color: _isTyping ? Colors.white38 : Colors.white70, fontFamily: String.fromEnvironment('MonosRegular' )
+          color: _isTyping ? Colors.white38 : Colors.white70, 
+          fontFamily: 'MonosRegular'
         ),
         filled: true,
         fillColor: _isTyping ? Colors.black26 : Colors.white12,
@@ -194,11 +258,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
 
     return Scaffold(
-      backgroundColor:  Color.fromARGB(255, 19, 19, 19),
+      backgroundColor: const Color.fromARGB(255, 19, 19, 19),
       resizeToAvoidBottomInset: true,
       appBar: AppBar(
         automaticallyImplyLeading: false,
-        backgroundColor: Color.fromARGB(0, 255, 0, 0),
+        backgroundColor: const Color.fromARGB(0, 255, 0, 0),
         elevation: 0,
         title: const SizedBox.shrink(),
         actions: [
@@ -227,11 +291,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               child: Align(
                 alignment: Alignment.topCenter,
                 child: WaveCircle(
-                size: screenWidth * 0.9,
-  speed: _waveSpeed,
-  amplitude: _waveAmplitude,
-  rings: _ringCount,
-  color: _waveColor, // cambia dinámicamente entre blanco y azul
+                  size: screenWidth * 0.9,
+                  speed: _waveSpeed,
+                  amplitude: _waveAmplitude,
+                  rings: _ringCount,
+                  color: _waveColor, // cambia dinámicamente entre blanco y azul
                 ),
               ),
             ),
@@ -324,7 +388,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       ),
 
       bottomNavigationBar: Container(
-        color: Color.fromARGB(0, 13, 13, 13),
+        color: const Color.fromARGB(0, 13, 13, 13),
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
         child: Row(
           mainAxisAlignment: MainAxisAlignment.spaceAround,

@@ -1,13 +1,18 @@
 import 'package:flutter/material.dart';
 import 'login.dart';
-import 'package:flutter_dotenv/flutter_dotenv.dart';
+//import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'storage_service.dart';
 
 
 Future<void> main() async {
-  WidgetsFlutterBinding.ensureInitialized();
-  await dotenv.load(fileName: ".env");
-  await StorageService.init();
+  // SÍ queremos que estas líneas se ejecuten:
+  WidgetsFlutterBinding.ensureInitialized(); 
+  
+  // NO queremos que esta línea se ejecute (la comentamos):
+  // await dotenv.load(fileName: ".env"); 
+
+  // SÍ queremos que estas líneas se ejecuten:
+  await StorageService.init(); 
   runApp(const MyApp());
 }
 

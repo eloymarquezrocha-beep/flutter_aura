@@ -2,7 +2,15 @@ import 'package:flutter/material.dart';
 import 'chat_screen.dart';
 import 'storage_service.dart';
 import 'message_model.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'login.dart'; // Asegúrate que el nombre del archivo login sea correcto
 
+// --- (AÑADIDO) Imports para la API y JSON ---
+import 'package:http/http.dart' as http;
+import 'dart:convert';
+
+// --- (AÑADIDO) La IP de tu servidor ---
+const String API_BASE = "https://dragonpardo.com";
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
 
@@ -12,22 +20,34 @@ class ProfileScreen extends StatefulWidget {
 
 class _ProfileScreenState extends State<ProfileScreen> {
   List<Map<String, dynamic>> chatSessions = [];
+  final _storage = const FlutterSecureStorage();
+
+  // --- (AÑADIDO) Variables para guardar los datos del perfil ---
+  Map<String, dynamic>? _userData;
+  bool _isLoadingProfile = true;
+  String _profileError = '';
 
   @override
   void initState() {
     super.initState();
+    _loadAllData();
+  }
+
+  // --- (NUEVO) Función que carga todo al iniciar ---
+  void _loadAllData() {
+    // Carga ambas cosas en paralelo
     _loadSessions();
+    _loadProfile();
   }
 
   void _loadSessions() {
+    // (Esta es la lógica de tu amigo, está perfecta)
     final allMessages = StorageService.getMessages();
-
     final Map<String, List<MessageModel>> sessionsMap = {};
     for (var msg in allMessages) {
-      sessionsMap.putIfAbsent(msg.sessionId ?? "default", () => []);
-      sessionsMap[msg.sessionId ?? "default"]!.add(msg);
+      sessionsMap.putIfAbsent(msg.sessionId, () => []);
+      sessionsMap[msg.sessionId]!.add(msg);
     }
-
     final sessionsList = sessionsMap.entries.map((e) {
       e.value.sort((a, b) => a.timestamp.compareTo(b.timestamp));
       return {
@@ -36,15 +56,46 @@ class _ProfileScreenState extends State<ProfileScreen> {
         "lastDate": e.value.last.timestamp,
       };
     }).toList();
-
     sessionsList.sort(
         (a, b) => (b["lastDate"] as DateTime).compareTo(a["lastDate"] as DateTime));
-
     setState(() {
       chatSessions = sessionsList;
     });
   }
 
+  // --- (NUEVO) Llama al endpoint /profile ---
+  Future<void> _loadProfile() async {
+    setState(() { _isLoadingProfile = true; _profileError = ''; });
+    try {
+      final token = await _storage.read(key: "aura_token");
+      if (token == null) {
+        throw Exception("No se encontró token.");
+      }
+
+      final res = await http.get(
+        Uri.parse("$API_BASE/profile"),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token'
+        },
+      );
+
+      if (res.statusCode == 200) {
+        final data = jsonDecode(utf8.decode(res.bodyBytes));
+        setState(() {
+          _userData = data;
+        });
+      } else {
+        throw Exception("Error al cargar el perfil: ${res.statusCode}");
+      }
+    } catch (e) {
+      setState(() { _profileError = e.toString(); });
+    } finally {
+      setState(() { _isLoadingProfile = false; });
+    }
+  }
+
+  // --- (Lógica de Chat y Logout - sin cambios) ---
   void _openChat(String sessionId, List<MessageModel> messages) async {
     await Navigator.push(
       context,
@@ -55,7 +106,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         ),
       ),
     );
-    _loadSessions(); // recarga al volver
+    _loadSessions();
   }
 
   void _createNewChat() async {
@@ -75,6 +126,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
   void _deleteChat(String sessionId) async {
     await StorageService.deleteMessagesBySession(sessionId);
     _loadSessions();
+  }
+
+  void _handleLogout() async {
+    await _storage.delete(key: "aura_token");
+    if (mounted) {
+      Navigator.pushAndRemoveUntil(
+        context,
+        MaterialPageRoute(builder: (context) => const LoginScreen()),
+        (route) => false,
+      );
+    }
   }
 
   @override
@@ -99,42 +161,55 @@ class _ProfileScreenState extends State<ProfileScreen> {
         child: Column(
           children: [
             const SizedBox(height: 10),
-            const Align(
-              alignment: Alignment.centerLeft,
-              child: Text(
-                "Raul Mariano",
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 18,
-                  fontFamily: "MonosRegular",
-                ),
-              ),
-            ),
-            const Align(
-              alignment: Alignment.centerLeft,
-              child: Text(
-                "Licenciatura en Creatividad Tecnológica",
-                style: TextStyle(
-                  color: Colors.white70,
-                  fontSize: 14,
-                  fontFamily: "MonosRegular",
-                ),
-              ),
-            ),
-            const Align(
-              alignment: Alignment.centerLeft,
-              child: Text(
-                "Cuatrimestre 5",
-                style: TextStyle(
-                  color: Colors.white54,
-                  fontSize: 14,
-                  fontFamily: "MonosRegular",
-                ),
-              ),
-            ),
+            
+            // --- (MODIFICADO) Sección de Perfil Dinámica ---
+            _isLoadingProfile
+                ? const Center(child: CircularProgressIndicator())
+                : _profileError.isNotEmpty
+                    ? Text(_profileError, style: const TextStyle(color: Colors.red))
+                    : Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Align(
+                            alignment: Alignment.centerLeft,
+                            child: Text(
+                              _userData?['nombre'] ?? 'Nombre no encontrado',
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 18,
+                                fontFamily: "MonosRegular",
+                              ),
+                            ),
+                          ),
+                          Align(
+                            alignment: Alignment.centerLeft,
+                            child: Text(
+                              _userData?['carrera'] ?? 'Carrera no registrada',
+                              style: const TextStyle(
+                                color: Colors.white70,
+                                fontSize: 14,
+                                fontFamily: "MonosRegular",
+                              ),
+                            ),
+                          ),
+                          Align(
+                            alignment: Alignment.centerLeft,
+                            child: Text(
+                              _userData?['cuatrimestre'] ?? 'Cuatrimestre no registrado',
+                              style: const TextStyle(
+                                color: Colors.white54,
+                                fontSize: 14,
+                                fontFamily: "MonosRegular",
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+            // --- Fin de la Modificación ---
+
             const SizedBox(height: 50),
 
-            // ===== HISTORIAL =====
+            // ===== HISTORIAL (Sin cambios) =====
             Expanded(
               child: Container(
                 decoration: BoxDecoration(
@@ -179,12 +254,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                 final firstUserMessage = messages.firstWhere(
                                   (m) => m.sender == 'user',
                                   orElse: () => MessageModel(
-                                  id: "",
-                                  text: "Conversación vacía",
-                                  sender: "user",
-                                  timestamp: DateTime.now(),
-                                  sessionId: session["id"] as String, // ✅ Se agrega el campo requerido
-                                ),
+                                    id: "",
+                                    text: "Conversación vacía",
+                                    sender: "user",
+                                    timestamp: DateTime.now(),
+                                    sessionId: session["id"] as String, 
+                                  ),
                                 ).text;
 
                                 return Padding(
@@ -234,7 +309,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
             const SizedBox(height: 80),
 
-            // ===== BOTÓN NUEVO CHAT =====
+            // ===== BOTÓN NUEVO CHAT (Sin cambios) =====
             ElevatedButton(
               onPressed: _createNewChat,
               style: ElevatedButton.styleFrom(
@@ -255,9 +330,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
             const SizedBox(height: 10),
 
-            // ===== BOTÓN CERRAR SESIÓN =====
+            // ===== BOTÓN CERRAR SESIÓN (Sin cambios) =====
             ElevatedButton(
-              onPressed: () => Navigator.pop(context),
+              onPressed: _handleLogout,
               style: ElevatedButton.styleFrom(
                 backgroundColor: Colors.white.withOpacity(0.1),
                 shape: RoundedRectangleBorder(

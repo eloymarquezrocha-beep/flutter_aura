@@ -3,6 +3,12 @@ import 'package:flutter/services.dart';
 import 'package:glass/glass.dart';
 import 'wave.dart';
 
+// --- (AÑADIDO) Imports para la API ---
+import 'package:http/http.dart' as http;
+import 'dart:convert';
+
+// --- (AÑADIDO) La IP de tu servidor ---
+const String API_BASE = "https://dragonpardo.com";
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({super.key});
 
@@ -18,7 +24,65 @@ class RegisterScreenState extends State<RegisterScreen> {
   bool obscurePassword = true;
   bool obscureConfirm = true;
 
-  // Ajusta este valor para separar más o menos el teclado
+  // --- (AÑADIDO) Variables de estado para la API ---
+  String _message = '';
+  bool _isLoading = false;
+
+  // --- (AÑADIDO) Función para llamar a tu API de Flask ---
+  Future<void> _handleRegister() async {
+    // 1. Validar que las contraseñas coincidan
+    if (passwordController.text != confirmController.text) {
+      setState(() { _message = "Las contraseñas no coinciden"; });
+      return;
+    }
+
+    // 2. Mostrar estado "Pensando..."
+    setState(() { _isLoading = true; _message = ''; });
+
+    try {
+      // 3. Preparar el payload
+      final payload = jsonEncode({
+        "nombre": nameController.text.trim(),
+        "email": emailController.text.trim(),
+        "password": passwordController.text.trim()
+      });
+
+      // 4. Hacer la petición POST a tu servidor
+      final res = await http.post(
+        Uri.parse("$API_BASE/register"),
+        headers: {'Content-Type': 'application/json'},
+        body: payload,
+      );
+      
+      final data = jsonDecode(res.body);
+
+      // 5. Procesar la respuesta
+      if (res.statusCode == 201) { // 201 = Created (Éxito)
+        setState(() { 
+          _message = "¡Usuario registrado! Serás redirigido al login..."; 
+        });
+        
+        // Espera 2 segundos y regresa a la pantalla de Login
+        Future.delayed(const Duration(seconds: 2), () {
+          if (mounted) {
+            Navigator.pop(context); // 'pop' regresa a la pantalla anterior
+          }
+        });
+
+      } else {
+        // Muestra el error del servidor (ej. "El correo ya está registrado")
+        setState(() { _message = data['error'] ?? 'Error desconocido'; });
+      }
+    } catch (e) {
+      // Error de Red
+      setState(() { _message = "Error de Red. Revisa la conexión."; });
+    }
+    
+    // 6. Dejar de "pensar"
+    setState(() { _isLoading = false; });
+  }
+
+
   final double keyboardDistance = 20;
 
   @override
@@ -104,7 +168,9 @@ class RegisterScreenState extends State<RegisterScreen> {
                       width: screenWidth * 0.6,
                       height: screenWidth * 0.12,
                       child: ElevatedButton(
-                        onPressed: () => print("Cuenta creada ✅"),
+                        // --- (MODIFICADO) ---
+                        onPressed: _isLoading ? null : _handleRegister,
+                        // --------------------
                         style: ElevatedButton.styleFrom(
                           backgroundColor: const Color(0xFF4A4A4A),
                           shape: RoundedRectangleBorder(
@@ -115,14 +181,18 @@ class RegisterScreenState extends State<RegisterScreen> {
                           ),
                           elevation: 0,
                         ),
-                        child: const Text(
-                          'Crear Cuenta',
-                          style: TextStyle(
-                              color: Colors.white,
-                              fontFamily: 'monospace',
-                              fontSize: 15,
-                              letterSpacing: 1.1),
-                        ),
+                        // --- (MODIFICADO) ---
+                        child: _isLoading
+                            ? const CircularProgressIndicator(color: Colors.white, strokeWidth: 3,)
+                            : const Text(
+                                'Crear Cuenta',
+                                style: TextStyle(
+                                    color: Colors.white,
+                                    fontFamily: 'monospace',
+                                    fontSize: 15,
+                                    letterSpacing: 1.1),
+                              ),
+                        // --------------------
                       ).asGlass(
                         tintColor: const Color.fromARGB(200, 255, 255, 255),
                         blurX: 15,
@@ -131,6 +201,23 @@ class RegisterScreenState extends State<RegisterScreen> {
                       ),
                     ),
                     const SizedBox(height: 25),
+
+                    // --- (AÑADIDO) Widget para mostrar mensajes ---
+                    if (_message.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 10.0),
+                        child: Text(
+                          _message,
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            color: _message.startsWith("¡Usuario registrado!") ? Colors.greenAccent : Colors.redAccent,
+                            fontFamily: 'monospace',
+                            fontSize: 14,
+                          ),
+                        ),
+                      ),
+                    // ------------------------------------------
+
                     GestureDetector(
                       onTap: () => Navigator.pop(context),
                       child: const Text(
