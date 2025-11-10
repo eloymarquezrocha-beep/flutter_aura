@@ -27,6 +27,7 @@ dependencies:
   uuid: ^4.3.0
   flutter_native_splash: ^2.4.7
   cupertino_icons: ^1.0.8
+  shared_preferences: ^2.3.2
 
 dev_dependencies:
   flutter_test:
@@ -44,7 +45,6 @@ flutter:
   # Esto le dice a Flutter que incluya TODOS los archivos
   # que están dentro de la carpeta 'assets'.
   assets:
-    - .env
     - assets/
 
   # --- Sección de Fuentes ---

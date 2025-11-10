@@ -1,8 +1,9 @@
 import 'dart:collection';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:table_calendar/table_calendar.dart';
-import 'package:glass/glass.dart'; // <-- necesario para asGlass()
+import 'package:shared_preferences/shared_preferences.dart';
 
 class CustomCalendarScreen extends StatefulWidget {
   const CustomCalendarScreen({super.key});
@@ -32,6 +33,7 @@ class _CustomCalendarScreenState extends State<CustomCalendarScreen> {
   @override
   void initState() {
     super.initState();
+    _loadEvents(); // ✅ cargar eventos guardados
     _selectedDays.add(_focusedDay);
     _selectedEvents = ValueNotifier(_getEventsForDay(_focusedDay));
   }
@@ -42,8 +44,39 @@ class _CustomCalendarScreenState extends State<CustomCalendarScreen> {
     super.dispose();
   }
 
-  List<Event> _getEventsForDay(DateTime day) => _events[day] ?? [];
+  Future<void> _saveEvents() async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    Map<String, dynamic> jsonData = {};
 
+    _events.forEach((key, value) {
+      jsonData[key.toIso8601String()] =
+          value.map((e) => e.toJson()).toList();
+    });
+
+    await prefs.setString("events", jsonEncode(jsonData));
+  }
+
+  Future<void> _loadEvents() async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    String? data = prefs.getString("events");
+
+    if (data == null) return;
+
+    Map<String, dynamic> decoded = jsonDecode(data);
+
+    decoded.forEach((key, value) {
+      DateTime day = DateTime.parse(key);
+      List<Event> events =
+          (value as List).map((e) => Event.fromJson(e)).toList();
+      _events[day] = events;
+    });
+
+    setState(() {
+      _selectedEvents.value = _getEventsForDay(_focusedDay);
+    });
+  }
+
+  List<Event> _getEventsForDay(DateTime day) => _events[day] ?? [];
   List<Event> _getEventsForDays(Iterable<DateTime> days) =>
       [for (final d in days) ..._getEventsForDay(d)];
 
@@ -85,45 +118,59 @@ class _CustomCalendarScreenState extends State<CustomCalendarScreen> {
     }
   }
 
+  /// ✅ POPUP CENTRADO + Selector de fecha
   void _addEvent(DateTime day) {
     final TextEditingController titleController = TextEditingController();
     TimeOfDay? selectedTime;
+    DateTime selectedDate = day;
 
-    showModalBottomSheet(
+    showDialog(
       context: context,
-      backgroundColor: const Color(0xFF121212),
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (_) => StatefulBuilder(
-        builder: (context, setModalState) => Padding(
-          padding: const EdgeInsets.all(20),
-          child: Column(
+      barrierDismissible: false,
+      builder: (_) => AlertDialog(
+        backgroundColor: const Color(0xFF121212),
+        title: const Text(
+          'Agregar Evento',
+          style: TextStyle(color: Colors.white, fontFamily: 'MonosRegular'),
+        ),
+        content: StatefulBuilder(
+          builder: (context, setModalState) => Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Text(
-                'Agregar Evento',
-                style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold, fontFamily: 'MonosRegular'),
-              ),
-              const SizedBox(height: 20),
               TextField(
                 controller: titleController,
                 style: const TextStyle(color: Colors.white, fontFamily: 'MonosRegular'),
-                decoration: InputDecoration(
+                decoration: const InputDecoration(
                   hintText: 'Título del evento',
-                  hintStyle: const TextStyle(color: Colors.white70, fontFamily: 'MonosRegular'),
-                  filled: true,
-                  fillColor: const Color(0xFF2C2C2C),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(15),
-                    borderSide: BorderSide.none,
-                  ),
+                  hintStyle: TextStyle(color: Colors.white70),
                 ),
               ),
               const SizedBox(height: 15),
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      'Fecha: ${DateFormat('dd/MM/yyyy').format(selectedDate)}',
+                      style: const TextStyle(color: Colors.white70, fontFamily: 'MonosRegular'),
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.calendar_today, color: Colors.white),
+                    onPressed: () async {
+                      final pickedDate = await showDatePicker(
+                        context: context,
+                        initialDate: selectedDate,
+                        firstDate: DateTime(2020),
+                        lastDate: DateTime(2035),
+                      );
+                      if (pickedDate != null) {
+                        setModalState(() => selectedDate = pickedDate);
+                      }
+                    },
+                  )
+                ],
+              ),
+              const SizedBox(height: 10),
               Row(
                 children: [
                   Expanded(
@@ -148,36 +195,39 @@ class _CustomCalendarScreenState extends State<CustomCalendarScreen> {
                   ),
                 ],
               ),
-              const SizedBox(height: 20),
-              ElevatedButton(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color.fromARGB(255, 255, 0, 0),
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12)),
-                ),
-                onPressed: () {
-                  if (titleController.text.trim().isEmpty) return;
-                  final newEvent = Event(
-                    titleController.text.trim(),
-                    time: selectedTime,
-                    date: day,
-                  );
-                  setState(() {
-                    _events.putIfAbsent(day, () => []).add(newEvent);
-                    _selectedEvents.value = _getEventsForDay(day);
-                  });
-                  Navigator.pop(context);
-                },
-                child: const Text('Guardar Evento'),
-              ),
             ],
           ),
         ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancelar', style: TextStyle(color: Color.fromARGB(255, 255, 255, 255))),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color.fromARGB(255, 255, 255, 255),
+            ),
+            onPressed: () async {
+              if (titleController.text.trim().isEmpty) return;
+              final newEvent = Event(
+                titleController.text.trim(),
+                time: selectedTime,
+                date: selectedDate,
+              );
+              setState(() {
+                _events.putIfAbsent(selectedDate, () => []).add(newEvent);
+                _selectedEvents.value = _getEventsForDay(selectedDate);
+              });
+              await _saveEvents(); // ✅ Guardar al agregar
+              Navigator.pop(context);
+            },
+            child: const Text('Guardar'),
+          ),
+        ],
       ),
     );
   }
 
-  /// ✅ BARRA DE NAVEGACIÓN INFERIOR (sin cambios)
   Widget _navButtonSelected(String asset) {
     return Container(
       padding: const EdgeInsets.all(8),
@@ -206,11 +256,10 @@ class _CustomCalendarScreenState extends State<CustomCalendarScreen> {
 
   @override
   Widget build(BuildContext context) {
-
     return Scaffold(
       backgroundColor: const Color.fromARGB(255, 19, 19, 19),
       appBar: AppBar(
-        automaticallyImplyLeading: false, // <- quita flecha
+        automaticallyImplyLeading: false,
         backgroundColor: const Color.fromARGB(0, 26, 26, 26),
         title: const Text(
           'Calendario de Eventos',
@@ -218,16 +267,12 @@ class _CustomCalendarScreenState extends State<CustomCalendarScreen> {
         ),
         centerTitle: true,
       ),
-
-      // FAB centrado
       floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
       floatingActionButton: FloatingActionButton(
         backgroundColor: const Color.fromARGB(255, 44, 94, 122),
         onPressed: () => _addEvent(_focusedDay),
         child: const Icon(Icons.add, color: Colors.white),
       ),
-
-      /// ✅ CONTENIDO DEL CALENDARIO (sin cambios en layout)
       body: Column(
         children: [
           TableCalendar<Event>(
@@ -252,21 +297,27 @@ class _CustomCalendarScreenState extends State<CustomCalendarScreen> {
               titleCentered: true,
               formatButtonVisible: true,
               formatButtonShowsNext: false,
-              titleTextStyle:
-                  TextStyle(color: Color.fromARGB(255, 255, 255, 255), fontSize: 20, fontWeight: FontWeight.bold, fontFamily: 'MonosRegular'),
+              titleTextStyle: TextStyle(
+                  color: Color.fromARGB(255, 255, 255, 255),
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                  fontFamily: 'MonosRegular'),
               formatButtonDecoration: BoxDecoration(
                 color: Color.fromARGB(255, 44, 94, 122),
                 borderRadius: BorderRadius.all(Radius.circular(15)),
               ),
-              formatButtonTextStyle: TextStyle(color: Color.fromARGB(255, 255, 255, 255), fontFamily: 'MonosRegular'),
+              formatButtonTextStyle:
+                  TextStyle(color: Colors.white, fontFamily: 'MonosRegular'),
               leftChevronIcon:
                   Icon(Icons.chevron_left, color: Colors.white70, size: 28),
               rightChevronIcon:
                   Icon(Icons.chevron_right, color: Colors.white70, size: 28),
             ),
             calendarStyle: const CalendarStyle(
-              defaultTextStyle: TextStyle(color: Colors.white, fontFamily: 'MonosRegular',),
-              weekendTextStyle: TextStyle(color: Color.fromARGB(255, 255, 255, 255),fontFamily: 'MonosRegular',),
+              defaultTextStyle:
+                  TextStyle(color: Colors.white, fontFamily: 'MonosRegular'),
+              weekendTextStyle:
+                  TextStyle(color: Colors.white, fontFamily: 'MonosRegular'),
               outsideDaysVisible: false,
               todayDecoration: BoxDecoration(
                 color: Color.fromARGB(255, 44, 94, 122),
@@ -277,7 +328,7 @@ class _CustomCalendarScreenState extends State<CustomCalendarScreen> {
                 shape: BoxShape.circle,
               ),
               markerDecoration: BoxDecoration(
-                color: Color.fromARGB(255, 255, 255, 255),
+                color: Colors.white,
                 shape: BoxShape.circle,
               ),
             ),
@@ -291,7 +342,8 @@ class _CustomCalendarScreenState extends State<CustomCalendarScreen> {
                   return const Center(
                     child: Text(
                       'No hay eventos para este día',
-                      style: TextStyle(color: Colors.white54, fontFamily: 'MonosRegular'),
+                      style: TextStyle(
+                          color: Colors.white54, fontFamily: 'MonosRegular'),
                     ),
                   );
                 }
@@ -299,11 +351,6 @@ class _CustomCalendarScreenState extends State<CustomCalendarScreen> {
                   itemCount: value.length,
                   itemBuilder: (context, index) {
                     final event = value[index];
-
-
-
-
-                    // Dismissible para borrar deslizando (solo modifica esto)
                     return Dismissible(
                       key: ValueKey('${event.title}-${event.date}-$index'),
                       direction: DismissDirection.endToStart,
@@ -313,36 +360,42 @@ class _CustomCalendarScreenState extends State<CustomCalendarScreen> {
                         color: const Color.fromARGB(255, 255, 6, 6),
                         child: const Icon(Icons.delete, color: Colors.white),
                       ),
-                      onDismissed: (direction) {
+                      onDismissed: (direction) async {
                         setState(() {
                           _events[event.date]?.remove(event);
-                          _selectedEvents.value = _getEventsForDay(event.date);
+                          _selectedEvents.value =
+                              _getEventsForDay(event.date);
                         });
-
-
-
-
+                        await _saveEvents(); // ✅ guardar al eliminar
                       },
                       child: Container(
-                        margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                        margin: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 6),
                         decoration: BoxDecoration(
                           color: const Color.fromARGB(255, 74, 74, 74),
                           borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: const Color.fromARGB(255, 44, 94, 122)),
+                          border: Border.all(
+                              color: const Color.fromARGB(255, 44, 94, 122)),
                         ),
                         child: ListTile(
                           title: Text(
                             event.title,
-                            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontFamily: 'MonosRegular'),
+                            style: const TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.bold,
+                                fontFamily: 'MonosRegular'),
                           ),
                           subtitle: Text(
                             "${DateFormat('dd MMM yyyy').format(event.date)}"
                             "${event.time != null ? ' • ${event.time!.format(context)}' : ''}",
-                            style: const TextStyle(color: Colors.white70, fontFamily: 'MonosItalic'),
+                            style: const TextStyle(
+                                color: Colors.white70,
+                                fontFamily: 'MonosItalic'),
                           ),
-                          trailing: const Icon(Icons.event, color: Color.fromARGB(255, 44, 94, 122)),
+                          trailing: const Icon(Icons.event,
+                              color: Color.fromARGB(255, 44, 94, 122)),
                         ),
-                      )
+                      ),
                     );
                   },
                 );
@@ -351,8 +404,6 @@ class _CustomCalendarScreenState extends State<CustomCalendarScreen> {
           ),
         ],
       ),
-
-      /// ✅ Bottom Nav agregado al final (sin cambios funcionales)
       bottomNavigationBar: Container(
         color: const Color.fromARGB(0, 13, 13, 13),
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
@@ -370,7 +421,6 @@ class _CustomCalendarScreenState extends State<CustomCalendarScreen> {
   }
 }
 
-/// Modelo básico de Evento
 class Event {
   final String title;
   final TimeOfDay? time;
@@ -378,8 +428,30 @@ class Event {
 
   const Event(this.title, {this.time, required this.date});
 
+  Map<String, dynamic> toJson() => {
+        "title": title,
+        "timeHour": time?.hour,
+        "timeMinute": time?.minute,
+        "date": date.toIso8601String(),
+      };
+
+  factory Event.fromJson(Map<String, dynamic> json) {
+    TimeOfDay? time;
+    if (json["timeHour"] != null) {
+      time = TimeOfDay(
+        hour: json["timeHour"],
+        minute: json["timeMinute"],
+      );
+    }
+    return Event(
+      json["title"],
+      time: time,
+      date: DateTime.parse(json["date"]),
+    );
+  }
+
   @override
-  String toString() => '$title (${DateFormat('dd/MM/yyyy').format(date)})';
+  String toString() => '$title';
 }
 
 int getHashCode(DateTime key) =>
